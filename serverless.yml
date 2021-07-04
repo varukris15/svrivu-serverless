@@ -1,0 +1,109 @@
+org: varunreva1990
+app: myapp
+service: aws-node-express-dynamodb-api-project
+
+frameworkVersion: '2'
+
+custom:
+  tableName: 'users-table-${self:provider.stage}'
+  vpcConfig:
+    vpcId: vpc-e335f988
+    subnets:
+      - subnet-f45903b8
+      - subnet-17c8a56c
+      - subnet-dcc035b7
+
+
+provider:
+  name: aws
+  runtime: nodejs12.x
+  region: ap-south-1
+  lambdaHashingVersion: '20201221'
+  stage: dev
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - dynamodb:Query
+            - dynamodb:Scan
+            - dynamodb:GetItem
+            - dynamodb:PutItem
+            - dynamodb:UpdateItem
+            - dynamodb:DeleteItem
+          Resource:
+            - Fn::GetAtt: [ UsersTable, Arn ]
+  environment:
+    USERS_TABLE: ${self:custom.tableName}
+
+functions:
+  api:
+    handler: handler.handler
+    events:
+      - http:
+          path: /
+          method: ANY
+      - http:
+          path: /{proxy+}
+          method: ANY
+      - alb:
+          listenerArn: 
+            Ref: Listener
+          priority: 1
+          conditions:
+            path: /hello    
+
+resources:
+  Resources:
+    UsersTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        AttributeDefinitions:
+          - AttributeName: userId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: userId
+            KeyType: HASH
+        ProvisionedThroughput:
+          ReadCapacityUnits: 1
+          WriteCapacityUnits: 1
+        TableName: ${self:custom.tableName}
+
+    SecurityGroup:
+      Type: AWS::EC2::SecurityGroup
+      Properties: 
+        GroupDescription: Generic HTTP Security Group
+        SecurityGroupIngress: 
+          -
+            CidrIp: 0.0.0.0/0
+            FromPort: 80
+            IpProtocol: tcp
+            ToPort: 80
+        VpcId: ${self:custom.vpcConfig.vpcId}
+
+    LoadBalancer:
+      Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+      Properties: 
+        SecurityGroups: 
+          - Ref: SecurityGroup
+        Subnets: 
+          ${self:custom.vpcConfig.subnets}
+
+    TargetGroup:
+      Type: AWS::ElasticLoadBalancingV2::TargetGroup
+      Properties: 
+        TargetType: lambda
+
+    Listener:
+      Type: AWS::ElasticLoadBalancingV2::Listener
+      Properties: 
+        DefaultActions: 
+          - 
+            Order: 1
+            TargetGroupArn:
+              Ref: TargetGroup
+            Type: forward
+        LoadBalancerArn:
+          Ref: LoadBalancer
+        Port: 80
+        Protocol: HTTP
